@@ -56,7 +56,7 @@ router.post('/grade', upload.fields([
 
         // Run Python script
         console.log(pythonScriptPath, baremPath, elevPath);
-        const pythonProcess = spawn('python3', [pythonScriptPath, baremPath, elevPath]);
+        const pythonProcess = spawn('python', [pythonScriptPath, baremPath, elevPath]);
 
         let dataString = '';
         let errorString = '';
@@ -87,7 +87,11 @@ router.post('/grade', upload.fields([
             }
 
             try {
-                const results = JSON.parse(dataString);
+                console.log('Raw Python output:', dataString);        // ADAUGĂ ASTA!
+                console.log('Python stderr:', errorString);           // ȘI ASTA!
+                console.log('Exit code:', code);                       // ȘI ASTA!
+                
+                const results = JSON.parse(dataString); 
                 const processingTime = Date.now() - startTime;
                 
                 // Save to MongoDB
@@ -124,9 +128,11 @@ router.post('/grade', upload.fields([
                 res.json(response);
             } catch (err) {
                 console.error('Error parsing Python output or saving to DB:', err);
+                console.error('Raw dataString was:', dataString);      // ADAUGĂ ȘI ASTA!
                 res.status(500).json({
                     error: 'Error parsing results or saving to database',
-                    details: err.message
+                    details: err.message,
+                    rawOutput: dataString                               // ȘI ASTA!
                 });
             }
         });
