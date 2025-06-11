@@ -55,6 +55,7 @@ router.post('/grade', upload.fields([
         const testTitle = req.body.testTitle || 'Test Grilă';
 
         // Run Python script
+        console.log(pythonScriptPath, baremPath, elevPath);
         const pythonProcess = spawn('python3', [pythonScriptPath, baremPath, elevPath]);
 
         let dataString = '';
