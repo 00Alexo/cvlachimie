@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
-WORKDIR /app
+WORKDIR /backend
 
 # Copy backend package.json and install Node.js dependencies
 COPY backend/package.json ./
@@ -53,7 +53,7 @@ RUN mkdir -p uploads
 EXPOSE 4000
 
 # Set environment variables
-ENV PYTHONPATH="/app"
+ENV PYTHONPATH="/backend"
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Start the application
