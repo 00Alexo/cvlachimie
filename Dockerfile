@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Install Python and required system dependencies
+# Install Python and required system dependencies for OpenCV and EasyOCR
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -12,7 +12,20 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender-dev \
     libgomp1 \
-    libgthread-2.0-0 \
+    libgcc-s1 \
+    libgtk-3-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libv4l-dev \
+    libxvidcore-dev \
+    libx264-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libatlas-base-dev \
+    gfortran \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
