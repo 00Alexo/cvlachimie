@@ -39,4 +39,4 @@ EXPOSE 4000
 ENV PYTHONPATH="/app"
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "index.js"]
