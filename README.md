@@ -408,7 +408,6 @@ Acest proiect este licențiat sub MIT License - vezi fișierul [LICENSE](LICENSE
 
 ## 📞 Contact și Suport
 
-- **Email**: contact@cvlachimie.ro
 - **GitHub Issues**: Pentru bug reports și feature requests
 - **Documentație**: Wiki-ul proiectului pentru ghiduri detaliate
 
