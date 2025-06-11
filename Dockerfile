@@ -18,16 +18,16 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy package.json and install Node.js dependencies
-COPY package.json ./
+# Copy backend package.json and install Node.js dependencies
+COPY backend/package.json ./
 RUN npm install
 
 # Copy Python requirements and install Python dependencies
-COPY requirements.txt ./
+COPY backend/requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy backend application code
+COPY backend/ .
 
 # Create uploads directory
 RUN mkdir -p uploads
