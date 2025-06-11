@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-dev \
+    python3-venv \
     build-essential \
     libgl1-mesa-glx \
     libglib2.0-0 \
@@ -35,9 +36,12 @@ WORKDIR /app
 COPY backend/package.json ./
 RUN npm install
 
-# Copy Python requirements and install Python dependencies
+# Create Python virtual environment
+RUN python3 -m venv /opt/venv
+
+# Activate virtual environment and install Python dependencies
 COPY backend/requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Copy backend application code
 COPY backend/ .
@@ -48,8 +52,9 @@ RUN mkdir -p uploads
 # Expose port
 EXPOSE 4000
 
-# Set environment variable for Python
+# Set environment variables
 ENV PYTHONPATH="/app"
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Start the application
 CMD ["node", "index.js"]
