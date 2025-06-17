@@ -35,27 +35,10 @@ const upload = multer({
     }
 });
 
-// Grade test endpoint
-router.post('/grade', upload.fields([
-    { name: 'barem', maxCount: 1 },
-    { name: 'elev', maxCount: 1 }
-]), async (req, res) => {
-    const startTime = Date.now();
-    
-    try {
-        if (!req.files || !req.files.barem || !req.files.elev) {
-            return res.status(400).json({
-                error: 'Both barem and elev images are required'
-            });
-        }
-
-        const baremPath = req.files.barem[0].path;
-        const elevPath = req.files.elev[0].path;
+// Helper function to process single test
+const processSingleTest = (baremPath, elevPath, testTitle = 'Test Grilă') => {
+    return new Promise((resolve, reject) => {
         const pythonScriptPath = path.join(__dirname, '../python/verificareGrila.py');
-        const testTitle = req.body.testTitle || 'Test Grilă';
-
-        // Run Python script
-        console.log(pythonScriptPath, baremPath, elevPath);
         const pythonProcess = spawn('python', [pythonScriptPath, baremPath, elevPath]);
 
         let dataString = '';
@@ -72,29 +55,19 @@ router.post('/grade', upload.fields([
         pythonProcess.on('close', async (code) => {
             // Clean up uploaded files
             try {
-                fs.unlinkSync(baremPath);
                 fs.unlinkSync(elevPath);
             } catch (err) {
-                console.error('Error cleaning up files:', err);
+                console.error('Error cleaning up elev file:', err);
             }
 
             if (code !== 0) {
                 console.error('Python script error:', errorString);
-                return res.status(500).json({
-                    error: 'Error processing images',
-                    details: errorString
-                });
+                return reject(new Error(`Python script failed: ${errorString}`));
             }
 
             try {
-                console.log('Raw Python output:', dataString);        // ADAUGĂ ASTA!
-                console.log('Python stderr:', errorString);           // ȘI ASTA!
-                console.log('Exit code:', code);                       // ȘI ASTA!
+                const results = JSON.parse(dataString);
                 
-                const results = JSON.parse(dataString); 
-                const processingTime = Date.now() - startTime;
-                
-                // Save to MongoDB
                 const testResult = new TestResult({
                     testTitle: testTitle,
                     studentName: results.student_name || {
@@ -104,41 +77,169 @@ router.post('/grade', upload.fields([
                     },
                     correctAnswers: results.correct_answers,
                     totalQuestions: results.total_questions,
-                    //scorePercentage: results.score_percentage,
-                    //gradeOutOf10: results.grade_out_of_10,
                     baremMatrix: results.barem_matrix,
                     elevMatrix: results.elev_matrix,
                     details: results.details,
                     resultImage: results.result_image,
-                    processingTime: processingTime
+                    processingTime: 0
                 });
 
                 const savedResult = await testResult.save();
-                console.log('Test result saved to MongoDB:', savedResult._id);
                 
-                // Add additional metadata to response
-                const response = {
+                resolve({
                     success: true,
-                    timestamp: new Date().toISOString(),
-                    processingTime: processingTime,
                     savedId: savedResult._id,
+                    studentName: results.student_name?.name || 'Nu s-a detectat',
+                    correctAnswers: results.correct_answers,
+                    totalQuestions: results.total_questions,
                     ...results
-                };
-
-                res.json(response);
+                });
             } catch (err) {
                 console.error('Error parsing Python output or saving to DB:', err);
-                console.error('Raw dataString was:', dataString);      // ADAUGĂ ȘI ASTA!
-                res.status(500).json({
-                    error: 'Error parsing results or saving to database',
-                    details: err.message,
-                    rawOutput: dataString                               // ȘI ASTA!
+                reject(new Error(`Error processing results: ${err.message}`));
+            }
+        });
+    });
+};
+
+// Single test endpoint (existing)
+router.post('/grade', upload.fields([
+    { name: 'barem', maxCount: 1 },
+    { name: 'elev', maxCount: 1 }
+]), async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+        if (!req.files || !req.files.barem || !req.files.elev) {
+            return res.status(400).json({
+                error: 'Both barem and elev images are required'
+            });
+        }
+
+        const baremPath = req.files.barem[0].path;
+        const elevPath = req.files.elev[0].path;
+        const testTitle = req.body.testTitle || 'Test Grilă';
+
+        const result = await processSingleTest(baremPath, elevPath, testTitle);
+        
+        // Clean up barem file
+        try {
+            fs.unlinkSync(baremPath);
+        } catch (err) {
+            console.error('Error cleaning up barem file:', err);
+        }
+
+        const processingTime = Date.now() - startTime;
+        
+        // Update processing time in database
+        await TestResult.findByIdAndUpdate(result.savedId, { processingTime });
+
+        const response = {
+            timestamp: new Date().toISOString(),
+            processingTime: processingTime,
+            ...result
+        };
+
+        res.json(response);
+    } catch (error) {
+        console.error('Error in grading endpoint:', error);
+        res.status(500).json({
+            error: 'Internal server error',
+            details: error.message
+        });
+    }
+});
+
+router.post('/grade-batch', upload.fields([
+    { name: 'barem', maxCount: 1 },
+    { name: 'students', maxCount: 30 }
+]), async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+        if (!req.files || !req.files.barem || !req.files.students) {
+            return res.status(400).json({
+                error: 'Barem image and at least one student image are required'
+            });
+        }
+
+        const baremPath = req.files.barem[0].path;
+        const studentFiles = req.files.students;
+        const testTitle = req.body.testTitle || 'Test Grilă - Procesare în Lot';
+
+        console.log(`Processing batch of ${studentFiles.length} tests with barem: ${baremPath}`);
+
+        // Process all tests in parallel
+        const processingPromises = studentFiles.map(async (studentFile, index) => {
+            try {
+                console.log(`Processing test ${index + 1}/${studentFiles.length}: ${studentFile.filename}`);
+                const result = await processSingleTest(baremPath, studentFile.path, `${testTitle} - Test ${index + 1}`);
+                return {
+                    index: index + 1,
+                    filename: studentFile.originalname,
+                    ...result
+                };
+            } catch (error) {
+                console.error(`Error processing test ${index + 1}:`, error);
+                return {
+                    index: index + 1,
+                    filename: studentFile.originalname,
+                    success: false,
+                    error: error.message
+                };
+            }
+        });
+
+        // Wait for all tests to complete
+        const results = await Promise.allSettled(processingPromises);
+        
+        // Clean up barem file
+        try {
+            fs.unlinkSync(baremPath);
+        } catch (err) {
+            console.error('Error cleaning up barem file:', err);
+        }
+
+        const processingTime = Date.now() - startTime;
+
+        // Separate successful and failed results
+        const successfulResults = [];
+        const failedResults = [];
+
+        results.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                if (result.value.success) {
+                    successfulResults.push(result.value);
+                } else {
+                    failedResults.push(result.value);
+                }
+            } else {
+                failedResults.push({
+                    index: index + 1,
+                    filename: studentFiles[index]?.originalname || 'Unknown',
+                    success: false,
+                    error: result.reason?.message || 'Unknown error'
                 });
             }
         });
 
+        const response = {
+            success: true,
+            timestamp: new Date().toISOString(),
+            processingTime: processingTime,
+            summary: {
+                totalTests: studentFiles.length,
+                successful: successfulResults.length,
+                failed: failedResults.length,
+                successRate: ((successfulResults.length / studentFiles.length) * 100).toFixed(1) + '%'
+            },
+            results: successfulResults,
+            errors: failedResults
+        };
+
+        res.json(response);
     } catch (error) {
-        console.error('Error in grading endpoint:', error);
+        console.error('Error in batch grading endpoint:', error);
         res.status(500).json({
             error: 'Internal server error',
             details: error.message

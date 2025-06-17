@@ -26,7 +26,7 @@ def image_to_base64(image):
     img_base64 = base64.b64encode(buffer).decode('utf-8')
     return f"data:image/png;base64,{img_base64}"
 
-def extract_name_from_input(image_path, x=142, y=24, w=439, h=30):
+def extract_name_from_input(image_path, x=142, y=24, w=439, h=50):
     """Extract name from input field"""
     try:
         # Check if easyocr is available
