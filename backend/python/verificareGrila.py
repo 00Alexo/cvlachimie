@@ -26,9 +26,13 @@ def image_to_base64(image):
     img_base64 = base64.b64encode(buffer).decode('utf-8')
     return f"data:image/png;base64,{img_base64}"
 
-def extract_name_from_input(image_path, x=430, y=10, w=239.5, h=63.87):
+def extract_name_from_input(image_path, x=142, y=24, w=439, h=30):
     """Extract name from input field"""
     try:
+        # Check if easyocr is available
+        if easyocr is None:
+            return {"error": "EasyOCR nu este instalat. Rulează: pip install easyocr"}
+        
         img = cv2.imread(image_path)
         if img is None:
             return {"error": "Nu s-a putut încărca imaginea"}
@@ -47,23 +51,29 @@ def extract_name_from_input(image_path, x=430, y=10, w=239.5, h=63.87):
         
         gray_roi = cv2.cvtColor(name_roi, cv2.COLOR_BGR2GRAY)
         
+        # Enhance the image for better OCR
         scale_factor = 3
         enlarged = cv2.resize(gray_roi, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
         
+        # Apply CLAHE for better contrast
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         enhanced = clahe.apply(enlarged)
         
+        # Denoise
         denoised = cv2.fastNlMeansDenoising(enhanced)
         
+        # Threshold
         _, binary = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
         if np.mean(binary) > 127:
             binary = cv2.bitwise_not(binary)
         
+        # Clean up
         kernel = np.ones((2,2), np.uint8)
         cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
         
-        reader = easyocr.Reader(['ro', 'en'])
+        # OCR
+        reader = easyocr.Reader(['ro', 'en'], gpu=False)
         results = reader.readtext(cleaned)
         
         detected_names = []
@@ -71,48 +81,61 @@ def extract_name_from_input(image_path, x=430, y=10, w=239.5, h=63.87):
         confidences = []
         
         for (bbox, text, confidence) in results:
-            if confidence > 0.3 and len(text.strip()) > 1:
+            if confidence > 0.2 and len(text.strip()) > 1:  # Lowered confidence threshold
                 clean_text = text.strip()
-                clean_text = ''.join(c for c in clean_text if c.isalnum() or c.isspace() or c in '.-')
-                
-                if clean_text:
+                # Filter out non-alphabetic characters for names
+                if any(c.isalpha() for c in clean_text):
                     detected_names.append({
-                        'text': clean_text,
-                        'confidence': float(confidence),  # Convert to float
-                        'bbox': bbox
+                        "text": clean_text,
+                        "confidence": float(confidence)
                     })
-                    all_text += clean_text + " "
+                    all_text += " " + clean_text
                     confidences.append(confidence)
         
         final_name = all_text.strip()
         avg_confidence = float(np.mean(confidences)) if confidences else 0.0
         
+        # Validation
         if final_name:
             if not any(c.isalpha() for c in final_name):
                 final_name = ""
                 avg_confidence = 0.0
+        
+        # Debug info
+        debug_info = {
+            "roi_shape": name_roi.shape,
+            "roi_mean": float(np.mean(gray_roi)),
+            "enhanced_mean": float(np.mean(enhanced)),
+            "binary_mean": float(np.mean(binary)),
+            "detected_count": len(results),
+            "raw_results": [(text, float(conf)) for (_, text, conf) in results]
+        }
         
         return {
             "name": final_name,
             "confidence": avg_confidence,
             "detected_elements": detected_names,
             "roi_coordinates": {"x": int(x), "y": int(y), "width": int(w), "height": int(h)},
-            "success": bool(final_name)
+            "success": bool(final_name),
+            "debug": debug_info
         }
         
     except ImportError:
         return {"error": "EasyOCR nu este instalat. Rulează: pip install easyocr"}
     except Exception as e:
-        return {"error": f"Eroare la extragerea numelui: {str(e)}"}
+        return {"error": f"Eroare la extragerea numelui: {str(e)}", "details": str(type(e).__name__)}
 
-def detect_checked_boxes(image_path):
-    """Detect checked boxes in image"""
+def detect_checked_boxes(image_path, start_y=75):
+    """Detect checked boxes in image starting from y coordinate"""
     try:
         img = cv2.imread(image_path)
         if img is None:
             return []
         
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Crop image to start from start_y to exclude name area
+        img_cropped = img[start_y:, :]
+        
+        gray = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
         
         adaptive_thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
@@ -140,7 +163,8 @@ def detect_checked_boxes(image_path):
                     if hull_area > 0:
                         solidity = area / hull_area
                         if solidity > 0.7:
-                            potential_boxes.append((x, y, w, h, area))
+                            # Add start_y offset to get correct coordinates in original image
+                            potential_boxes.append((x, y + start_y, w, h, area))
         
         if len(potential_boxes) > 5:
             try:
@@ -167,11 +191,14 @@ def detect_checked_boxes(image_path):
         checked_boxes = []
         
         for i, (x, y, w, h) in enumerate(boxes):
+            # Adjust coordinates back to cropped image for ROI extraction
+            y_cropped = y - start_y
+            
             margin1 = max(2, min(w, h) // 8)
             margin2 = max(4, min(w, h) // 6)
             
-            roi1 = cleaned[y+margin1:y+h-margin1, x+margin1:x+w-margin1]
-            roi2 = cleaned[y+margin2:y+h-margin2, x+margin2:x+w-margin2]
+            roi1 = cleaned[y_cropped+margin1:y_cropped+h-margin1, x+margin1:x+w-margin1]
+            roi2 = cleaned[y_cropped+margin2:y_cropped+h-margin2, x+margin2:x+w-margin2]
             
             if roi1.size == 0 or roi2.size == 0:
                 checked_boxes.append(0)
@@ -274,7 +301,7 @@ def calculate_score(barem_matrix, elev_matrix):
     score_percentage = (correct_answers / total_questions) * 100
     return score_percentage, correct_answers, total_questions, details
 
-def create_result_image(elev_path, barem_matrix, elev_matrix, questions_per_row=5):
+def create_result_image(elev_path, barem_matrix, elev_matrix, questions_per_row=5, start_y=75):
     """Create result image with colored boxes"""
     try:
         elev_img = cv2.imread(elev_path)
@@ -283,7 +310,10 @@ def create_result_image(elev_path, barem_matrix, elev_matrix, questions_per_row=
         
         result_img = elev_img.copy()
         
-        gray = cv2.cvtColor(elev_img, cv2.COLOR_BGR2GRAY)
+        # Crop image to start from start_y
+        img_cropped = elev_img[start_y:, :]
+        
+        gray = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2GRAY)
         _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
@@ -293,7 +323,8 @@ def create_result_image(elev_path, barem_matrix, elev_matrix, questions_per_row=
             if w > 20 and h > 20 and w < 100 and h < 100:
                 aspect_ratio = w / h
                 if 0.7 < aspect_ratio < 1.3:
-                    boxes.append((x, y, w, h))
+                    # Add start_y offset to get correct coordinates in original image
+                    boxes.append((x, y + start_y, w, h))
         
         boxes.sort(key=lambda box: (box[1], box[0]))
         
